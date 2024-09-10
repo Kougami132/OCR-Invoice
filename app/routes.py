@@ -1,7 +1,11 @@
 from flask import Blueprint, jsonify, request, current_app
 from paddleocr import PaddleOCR, draw_ocr
 from .entity.boundingbox import BoundingBox
-import os, office, glob, shutil
+import os
+import fitz
+import glob
+import shutil
+import time
 
 bp = Blueprint('api', __name__)
 
@@ -13,16 +17,17 @@ ocr = PaddleOCR(use_angle_cls=True, lang="ch")  # need to run only once to downl
 
 @bp.route('/invoice', methods=['POST'])
 def upload_file():
-    try:
+    # try:
         # 检查请求中是否包含文件
         if 'file' not in request.files:
-            return jsonify({"message": "文件不得为空"}), 400
+            return jsonify({"message": "文件为空"}), 400
 
         file = request.files['file']
+        file.filename
 
         # 如果用户没有选择文件，浏览器可能会提交一个空文件而没有文件名
         if file.filename == '':
-            return jsonify({"message": "文件不得为空"}), 400
+            return jsonify({"message": "文件名为空"}), 400
 
         # 检查文件格式
         def get_extension(filename):
@@ -38,18 +43,28 @@ def upload_file():
             if not os.path.exists(directory_path):
                 os.makedirs(directory_path)
         ensure_directory_exists(os.path.join("logs", "uploads"))
-        ensure_directory_exists(os.path.join("logs", "converts"))
 
-        filename = file.filename
+        file.filename = f"{int(time.time() * 1000)}.{get_extension(file.filename)}"
+        filename = file.filename # 完整文件名
+        _filename = os.path.basename(filename).rsplit('.', 1)[0] # 无后缀文件名
         filepath = os.path.join("logs", "uploads", filename)
         file.save(filepath)
         if get_extension(filename) == "pdf":
-            # pdf转jpg
-            office.pdf.pdf2imgs(
-                pdf_path=filepath,
-                out_dir=os.path.join("logs", "converts", filename)
-            )
-            img_path = glob.glob(os.path.join("logs", "converts", filename, "*.jpg"))[0]
+            def pdf2png(pdfPath, baseImagePath):
+                imagePath=os.path.join(baseImagePath,os.path.basename(pdfPath).rsplit('.', 1)[0])
+                ensure_directory_exists(imagePath)
+                pdfDoc = fitz.open(pdfPath)
+                totalPage=pdfDoc.page_count
+                for pg in range(totalPage):
+                    page = pdfDoc[pg]
+                    rotate = int(0)
+                    zoom_x = 2
+                    zoom_y = 2
+                    mat = fitz.Matrix(zoom_x, zoom_y).prerotate(rotate)
+                    pix = page.get_pixmap(matrix=mat, alpha=False)
+                    pix.save(imagePath + '/' + f'images_{pg+1}.png')
+            pdf2png(filepath, os.path.join("logs", "uploads"))
+            img_path = glob.glob(os.path.join("logs", "uploads", _filename, "*.png"))[0]
         else:
             img_path = filepath
 
@@ -83,7 +98,7 @@ def upload_file():
                 elif os.path.isdir(path):
                     shutil.rmtree(path)  # 删除目录及其所有内容
         delete_file_or_directory(os.path.join("logs", "uploads", filename))
-        delete_file_or_directory(os.path.join("logs", "converts", filename))
+        delete_file_or_directory(os.path.join("logs", "uploads", _filename))
         
         # 筛选数据
         def get_items() -> list[str]:
@@ -112,7 +127,7 @@ def upload_file():
             def find_items(top: BoundingBox, right: BoundingBox, bottom: BoundingBox) -> list[BoundingBox]:
                 res = []
                 for i in ocr_result:
-                    if i.top > top.bottom - 3 and i.bottom < bottom.top and i.right < right.left:
+                    if i.top > top.bottom - 5 and i.bottom < bottom.top and i.right < right.left:
                         res.append(i)
                 return res
             
@@ -135,5 +150,5 @@ def upload_file():
             "totalAmount": get_amount(), 
             "invoiceDetails": [{"itemName": item} for item in get_items()]
         }), 200
-    except Exception as e:
-        return jsonify({"message": "识别失败," +str(e)}), 400
+    # except Exception as e:
+    #     return jsonify({"message": "识别失败," +str(e)}), 400
