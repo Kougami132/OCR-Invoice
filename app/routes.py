@@ -111,7 +111,7 @@ def upload_file():
             # 寻找项目框右边标签位置
             def find_next_title(top: BoundingBox):
                 for i in range(len(ocr_result)):
-                    if top.text == ocr_result[i].text:
+                    if top.text == ocr_result[i].text and i < len(ocr_result):
                         return ocr_result[i + 1]
                 return None
             # 寻找项目框底部标签位置
@@ -139,7 +139,12 @@ def upload_file():
         def get_date() -> str:
             for i in ocr_result:
                 if "开票日期" in i.text:
-                    return i.text.replace("：", ":").replace("开票日期:", "")
+                    date = i.text.replace("：", ":").replace("开票日期:", "")
+                    if date.strip() == "":
+                        for j in range(len(ocr_result)):
+                            if i.text == ocr_result[j].text and j < len(ocr_result):
+                                date = ocr_result[j + 1].text
+                    return date
         def get_amount() -> str:
             for i in ocr_result:
                 if "小写" in i.text:
